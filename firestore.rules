@@ -5,33 +5,34 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     //
+    // Collection: users
+    // Document ID: userId (UID)
+    // Fields:
+    //   - email: string (required) - User's email address
+    //   - displayName: string (optional) - User's display name
+    //   - photoURL: string (optional) - User's profile photo URL
+    //   - lastLogin: string (required) - ISO 8601 timestamp of last login
+    //
     // Collection: projects
     // Document ID: auto-generated
     // Fields:
     //   - userId: string (required) - UID of the owner
     //   - name: string (required) - Name of the project
-    //   - type: string (required) - Type of project (image, video, voice, caption)
+    //   - type: string (required) - Type (image, video, voice, caption)
     //   - status: string (required) - Status (completed, pending)
-    //   - createdAt: timestamp (required) - Creation time
-    //   - imageUrl: string (optional) - Base64 image data
-    //   - videoUrl: string (optional) - Video URI
-    //   - audioUrl: string (optional) - Base64 audio data
-    //   - result: string (optional) - Text result
-    //
-    // Collection: users
-    // Document ID: userId
-    // Fields:
-    //   - email: string (required) - User's email
-    //   - displayName: string (optional) - User's display name
-    //   - photoURL: string (optional) - User's photo URL
+    //   - createdAt: timestamp (required) - Server timestamp
+    //   - imageUrl: string (optional) - Base64 or URL of generated image
+    //   - videoUrl: string (optional) - URL of generated video
+    //   - audioUrl: string (optional) - Base64 or URL of generated audio
+    //   - result: string (optional) - Text result (caption)
     //
     // ===============================================================
 
-    // Helper functions
+    // Helper Functions
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
@@ -40,26 +41,53 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == resource.data.userId;
     }
 
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*") || url.matches("^data:audio/.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'lastLogin']) &&
+             data.email is string && isValidEmail(data.email) &&
+             data.lastLogin is string && isValidDateString(data.lastLogin) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && isValidUrl(data.photoURL)));
+    }
+
     function isValidProject(data) {
       return data.keys().hasAll(['userId', 'name', 'type', 'status', 'createdAt']) &&
              data.userId == request.auth.uid &&
-             data.name is string && data.name.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
              data.type in ['image', 'video', 'voice', 'caption'] &&
              data.status in ['completed', 'pending'] &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() < 2000000)) &&
+             (!('videoUrl' in data) || (data.videoUrl is string && isValidUrl(data.videoUrl))) &&
+             (!('audioUrl' in data) || (data.audioUrl is string && data.audioUrl.size() < 2000000)) &&
+             (!('result' in data) || (data.result is string && data.result.size() < 10000));
     }
 
-    // Projects collection
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
     match /projects/{projectId} {
       allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isAuthenticated() && isValidProject(request.resource.data);
-      allow update: if isAuthenticated() && isDocOwner() && isValidProject(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidProject(request.resource.data) && 
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if isAuthenticated() && isDocOwner();
-    }
-
-    // Users collection
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
     }
   }
 }

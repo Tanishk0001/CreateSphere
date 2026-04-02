@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string", "format": "uri" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "lastLogin"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Generated AI content project",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["image", "video", "caption", "voice"] },
+        "name": { "type": "string" },
+        "createdAt": { "type": "object", "description": "Firestore server timestamp" },
+        "imageUrl": { "type": "string", "format": "uri" },
+        "videoUrl": { "type": "string", "format": "uri" },
+        "audioUrl": { "type": "string", "format": "uri" },
+        "result": { "type": "string" }
+      },
+      "required": ["type", "name", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{userId}/projects/{projectId}": {
+      "schema": "Project",
+      "description": "User's generated content projects"
+    }
+  }
+}
