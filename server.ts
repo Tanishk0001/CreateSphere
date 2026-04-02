@@ -35,7 +35,7 @@ app.post("/api/generate-video", async (req, res) => {
     // If it were available, we'd call openai.video.generations.create(...)
     
     res.status(501).json({ 
-      error: "OpenAI Video Generation (Sora) is currently in limited release and not publicly available via API yet. Please use Gemini for video generation or wait for OpenAI's public release." 
+      error: "OpenAI Video Generation (Sora) is currently  limited." 
     });
   } catch (error: any) {
     console.error("OpenAI Error:", error);
