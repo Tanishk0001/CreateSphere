@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: projects
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - UID of the owner
+    //   - name: string (required) - Name of the project
+    //   - type: string (required) - Type of project (image, video, voice, caption)
+    //   - status: string (required) - Status (completed, pending)
+    //   - createdAt: timestamp (required) - Creation time
+    //   - imageUrl: string (optional) - Base64 image data
+    //   - videoUrl: string (optional) - Video URI
+    //   - audioUrl: string (optional) - Base64 audio data
+    //   - result: string (optional) - Text result
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - email: string (required) - User's email
+    //   - displayName: string (optional) - User's display name
+    //   - photoURL: string (optional) - User's photo URL
+    //
+    // ===============================================================
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['userId', 'name', 'type', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() < 100 &&
+             data.type in ['image', 'video', 'voice', 'caption'] &&
+             data.status in ['completed', 'pending'] &&
+             data.createdAt is timestamp;
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidProject(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}
