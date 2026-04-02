@@ -13,6 +13,7 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import ForgotPassword from "./pages/ForgotPassword";
 import Navbar from "./components/Navbar";
+import Chatbot from "./components/Chatbot";
 
 interface User {
   email: string | null;
@@ -81,6 +82,7 @@ export default function App() {
               <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
             </Routes>
           </main>
+          <Chatbot />
         </div>
       </Router>
     </AuthContext.Provider>
