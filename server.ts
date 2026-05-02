@@ -67,14 +67,18 @@ const SOCIAL_CONFIG: any = {
 app.get("/api/auth/url/:platform", (req, res) => {
   const { platform } = req.params;
   const { userId } = req.query;
-  const config = SOCIAL_CONFIG[platform];
-  console.log(`[OAuth] auth/url request for ${platform} by user ${userId}`);
+  
+  // Normalize platform: treat "x" as "twitter"
+  const normalizedPlatform = platform === "x" ? "twitter" : platform;
+  const config = SOCIAL_CONFIG[normalizedPlatform];
+  
+  console.log(`[OAuth] auth/url request for ${normalizedPlatform} (orig: ${platform}) by user ${userId}`);
 
   if (!config || !config.clientId) {
-    console.error(`[OAuth] Missing clientId for ${platform}`);
+    console.error(`[OAuth] Missing clientId for ${normalizedPlatform}`);
     return res.status(400).json({ 
-      error: `${platform.charAt(0).toUpperCase() + platform.slice(1)} configuration missing.`, 
-      details: `Please set ${platform.toUpperCase()}_CLIENT_ID in the platform settings.` 
+      error: `${normalizedPlatform.charAt(0).toUpperCase() + normalizedPlatform.slice(1)} configuration missing.`, 
+      details: `Please set ${normalizedPlatform.toUpperCase()}_CLIENT_ID in the platform settings.` 
     });
   }
 
@@ -88,7 +92,7 @@ app.get("/api/auth/url/:platform", (req, res) => {
     : `${protocol}://${host}/api/auth/callback/${platform}`;
 
   console.log(`[OAuth] built redirectUri: ${redirectUri}`);
-  const state = Buffer.from(JSON.stringify({ userId, platform })).toString("base64");
+  const state = Buffer.from(JSON.stringify({ userId, platform: normalizedPlatform })).toString("base64");
 
   const params: any = {
     response_type: "code",
@@ -117,7 +121,6 @@ app.get("/api/auth/url/:platform", (req, res) => {
 app.get("/api/auth/callback/:platform", async (req, res) => {
   const { platform } = req.params;
   const { code, state, error: queryError } = req.query;
-  const config = SOCIAL_CONFIG[platform];
 
   if (queryError) {
     return res.status(400).send(`Authentication error: ${queryError}`);
@@ -128,8 +131,12 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
   }
 
   try {
-    const { userId } = JSON.parse(Buffer.from(state as string, "base64").toString());
-    console.log(`[OAuth] Callback for ${platform}, user: ${userId}`);
+    const { userId, platform: statePlatform } = JSON.parse(Buffer.from(state as string, "base64").toString());
+    const normalizedPlatform = platform === "x" ? "twitter" : (statePlatform || platform);
+    const config = SOCIAL_CONFIG[normalizedPlatform];
+    
+    console.log(`[OAuth] Callback for ${normalizedPlatform}, user: ${userId}`);
+
     // Ensure redirect URI uses https
     let host = req.get("host");
     let protocol = "https";
@@ -324,7 +331,7 @@ app.post("/api/generate-video", async (req, res) => {
     });
   } catch (error: any) {
     console.error("OpenAI Error:", error);
-    res.status(500).json({ error: error.message || "Failed to generate video with OpenAI." });
+    res.status(500).json({ error: error.message || "Failed to generate video." });
   }
 });
 
