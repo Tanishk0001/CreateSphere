@@ -6,7 +6,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Helper Functions
+    // Phase 3: Primitive Definitions
     function isSignedIn() {
       return request.auth != null;
     }
@@ -27,58 +27,62 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // Validation Blueprints
+    // 1. Mandatory Size Enforcements & 2. Validation Blueprints
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'lastLogin']) &&
+             data.keys().size() >= 2 && data.keys().size() <= 10 &&
              data.email is string && data.email.size() <= 256 &&
-             data.lastLogin is string; // Updated to match Home.tsx which uses ISO string for lastLogin
+             data.lastLogin is timestamp;
     }
 
     function isValidProject(data) {
       return data.keys().hasAll(['userId', 'name', 'type', 'status', 'createdAt']) &&
+             data.keys().size() >= 5 && data.keys().size() <= 10 &&
              data.userId == request.auth.uid &&
              data.name is string && data.name.size() <= 200 &&
              data.type in ['image', 'video', 'voice', 'caption', 'social'] &&
              data.status in ['completed', 'processing', 'failed', 'pending'] &&
-             (data.createdAt == request.time || data.createdAt is timestamp);
+             data.createdAt == request.time;
     }
 
     function isValidSocialConnection(data) {
       return data.keys().hasAll(['platform', 'accessToken', 'updatedAt']) &&
              data.platform in ['instagram', 'linkedin', 'twitter', 'youtube'] &&
-             data.accessToken is string && data.accessToken.size() <= 4096 &&
-             (data.updatedAt == request.time || data.updatedAt is timestamp);
+             data.accessToken is string && data.accessToken.size() <= 2048 &&
+             data.updatedAt == request.time;
     }
 
     // Rules for Users
     match /users/{userId} {
       allow get: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidUser(incoming());
-      
-      // Social Connections subcollection
-      // For listing a collection, the path variables are available.
-      // We allow list and get if the outer userId matches the authenticated user.
-      match /socialConnections/{platform} {
-        allow read: if isOwner(userId);
-        allow write: if isOwner(userId) && isValidId(platform);
-      }
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().email == existing().email;
     }
 
-    // Rules for Projects
+    // Rules for Projects (Top-level as per Dashboard.tsx usage)
     match /projects/{projectId} {
-      // Allow list if the user is signed in. The query itself must include
-      // where("userId", "==", auth.uid) for the rule to safely evaluate resource.data.userId.
-      // However, since we are using resource.data.userId in the rule, Firestore enforces
-      // that the client query MUST be restricted to own documents.
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
       
       allow create: if isSignedIn() && isValidProject(incoming());
       
-      allow update: if isOwner(existing().userId) && isValidProject(incoming()) && 
-                    incoming().userId == existing().userId;
-                    
+      allow update: if isOwner(existing().userId) && isValidProject(incoming()) && (
+        // Identity Integrity
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        // Action: Update Status or Results
+        incoming().diff(existing()).affectedKeys().hasAny(['status', 'imageUrl', 'videoUrl', 'audioUrl', 'result'])
+      );
+      
       allow delete: if isOwner(existing().userId);
+    }
+
+    // Rules for Social Connections (Subcollection)
+    match /users/{userId}/socialConnections/{platform} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidSocialConnection(incoming());
+      allow delete: if isOwner(userId);
     }
   }
 }

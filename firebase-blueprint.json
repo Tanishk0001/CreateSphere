@@ -17,7 +17,7 @@
       "description": "Generated AI content project",
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["image", "video", "caption", "voice"] },
+        "type": { "type": "string", "enum": ["image", "video", "caption", "voice", "social"] },
         "name": { "type": "string" },
         "createdAt": { "type": "object", "description": "Firestore server timestamp" },
         "imageUrl": { "type": "string", "format": "uri" },
@@ -26,6 +26,22 @@
         "result": { "type": "string" }
       },
       "required": ["type", "name", "createdAt"]
+    },
+    "SocialConnection": {
+      "title": "SocialConnection",
+      "description": "OAuth tokens for a social platform",
+      "type": "object",
+      "properties": {
+        "platform": { "type": "string", "enum": ["instagram", "linkedin", "twitter", "youtube"] },
+        "accessToken": { "type": "string" },
+        "refreshToken": { "type": "string" },
+        "expiresAt": { "type": "number" },
+        "profileName": { "type": "string" },
+        "profileHandle": { "type": "string" },
+        "profilePicture": { "type": "string", "format": "uri" },
+        "updatedAt": { "type": "object" }
+      },
+      "required": ["platform", "accessToken", "updatedAt"]
     }
   },
   "firestore": {
@@ -33,9 +49,13 @@
       "schema": "User",
       "description": "User profile document"
     },
-    "/users/{userId}/projects/{projectId}": {
+    "/projects/{projectId}": {
       "schema": "Project",
-      "description": "User's generated content projects"
+      "description": "All content projects (filtered by userId in app)"
+    },
+    "/users/{userId}/socialConnections/{platform}": {
+      "schema": "SocialConnection",
+      "description": "User's connected social media accounts"
     }
   }
 }

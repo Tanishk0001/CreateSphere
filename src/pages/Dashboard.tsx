@@ -7,11 +7,12 @@ import {
   Search, Bell, ChevronRight, Type, Send, Loader2,
   Download, Play, Pause, Volume2, Sparkles, MessageSquare,
   Users, Layers, Sliders, Monitor, Share2, MoreVertical,
-  Trash2, ExternalLink, Copy, Key
+  Trash2, ExternalLink, Copy, Key, Menu, X
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { db, auth, handleFirestoreError, OperationType } from "../firebase";
+import SocialHub from "../components/SocialHub";
 import { 
   collection, query, where, onSnapshot, addDoc, 
   serverTimestamp, deleteDoc, doc, orderBy 
@@ -30,7 +31,7 @@ declare global {
 interface Project {
   id: string;
   name: string;
-  type: "video" | "image" | "voice" | "caption";
+  type: "video" | "image" | "voice" | "caption" | "social";
   status: "completed" | "processing" | "failed";
   createdAt: any;
   result?: string;
@@ -46,7 +47,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   
   // AI State
-  const [activeTool, setActiveTool] = useState<"caption" | "voice" | "image" | "video" | null>(
+  const [activeTool, setActiveTool] = useState<"caption" | "voice" | "image" | "video" | "social" | null>(
     location.state?.initialTool || null
   );
   const [prompt, setPrompt] = useState("");
@@ -59,6 +60,7 @@ export default function Dashboard() {
   const [quality, setQuality] = useState("1080p");
   const [style, setStyle] = useState("cinematic");
   const [isCollaborative, setIsCollaborative] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -376,23 +378,59 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-slate-50 flex">
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50 flex flex-col md:flex-row">
+      {/* Mobile Sidebar Toggle - Visible only on mobile when sidebar is hidden */}
+      {!isSidebarOpen && (
+        <div className="md:hidden fixed top-20 left-4 z-[50]">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-3 bg-brand-600 text-white rounded-xl shadow-lg ring-4 ring-brand-500/20"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
+      {/* Sidebar Overlay for Mobile */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] md:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
-      <aside className="hidden lg:flex w-72 flex-col bg-white border-r border-slate-200 p-6">
-        <div className="space-y-1 mb-8">
+      <aside className={cn(
+        "fixed inset-y-0 left-0 w-72 bg-white border-r border-slate-200 p-6 z-[70] transition-transform duration-300 md:static md:translate-x-0 flex flex-col",
+        isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="flex md:hidden items-center justify-between mb-8">
+           <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Dashboard Menu</span>
+           <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-slate-400 hover:text-slate-600">
+             <X className="w-6 h-6" />
+           </button>
+        </div>
+
+        <div className="space-y-1 mb-8 overflow-y-auto">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2">Main Menu</p>
           {[
-            { icon: BarChart3, label: "Overview", active: !activeTool, onClick: () => setActiveTool(null) },
-            { icon: MessageSquare, label: "AI Captions", active: activeTool === "caption", onClick: () => setActiveTool("caption") },
-            { icon: Mic, label: "AI Speaking Agent", active: activeTool === "voice", onClick: () => setActiveTool("voice") },
-            { icon: ImageIcon, label: "AI Image Gen", active: activeTool === "image", onClick: () => setActiveTool("image") },
-            { icon: Video, label: "AI Video Gen", active: activeTool === "video", onClick: () => setActiveTool("video") },
+            { icon: BarChart3, label: "Overview", active: !activeTool, onClick: () => { setActiveTool(null); setIsSidebarOpen(false); } },
+            { icon: MessageSquare, label: "AI Captions", active: activeTool === "caption", onClick: () => { setActiveTool("caption"); setIsSidebarOpen(false); } },
+            { icon: Mic, label: "AI Speaking Agent", active: activeTool === "voice", onClick: () => { setActiveTool("voice"); setIsSidebarOpen(false); } },
+            { icon: ImageIcon, label: "AI Image Gen", active: activeTool === "image", onClick: () => { setActiveTool("image"); setIsSidebarOpen(false); } },
+            { icon: Video, label: "AI Video Gen", active: activeTool === "video", onClick: () => { setActiveTool("video"); setIsSidebarOpen(false); } },
+            { icon: Share2, label: "Social Hub", active: activeTool === "social", onClick: () => { setActiveTool("social"); setIsSidebarOpen(false); } },
           ].map((item, i) => (
             <button 
               key={i}
               onClick={item.onClick}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-left",
                 item.active ? "bg-brand-600 text-white shadow-lg shadow-brand-200" : "text-slate-600 hover:bg-slate-50"
               )}
             >
@@ -439,6 +477,7 @@ export default function Dashboard() {
                activeTool === "voice" ? "AI Speaking Agent" : 
                activeTool === "image" ? "AI Image Generation" :
                activeTool === "video" ? "AI Video Generation" :
+               activeTool === "social" ? "Social Hub & Publisher" :
                `Welcome back, ${user?.name}!`}
             </h1>
             <p className="text-slate-500 mt-1">
@@ -446,6 +485,7 @@ export default function Dashboard() {
                activeTool === "voice" ? "Professional voiceovers with natural speech synthesis." : 
                activeTool === "image" ? "Create stunning visuals from text descriptions." :
                activeTool === "video" ? "Cinematic video generation from text prompts." :
+               activeTool === "social" ? "Publish and schedule across multiple platforms." :
                "Manage your creative projects and AI generations."}
             </p>
           </div>
@@ -474,7 +514,17 @@ export default function Dashboard() {
         </header>
 
         <AnimatePresence mode="wait">
-          {activeTool ? (
+          {activeTool === "social" ? (
+             <motion.div
+               key="social"
+               initial={{ opacity: 0, scale: 0.98 }}
+               animate={{ opacity: 1, scale: 1 }}
+               exit={{ opacity: 0, scale: 0.98 }}
+               className="max-w-6xl mx-auto"
+             >
+               <SocialHub projects={projects} user={user} />
+             </motion.div>
+          ) : activeTool ? (
             <motion.div
               key="tool"
               initial={{ opacity: 0, scale: 0.98 }}

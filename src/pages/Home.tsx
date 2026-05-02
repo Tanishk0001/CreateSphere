@@ -3,7 +3,7 @@ import {
   Sparkles, Video, Image as ImageIcon, Mic, Zap, Users, 
   Settings, CheckCircle2, XCircle, ArrowRight, Play,
   BarChart3, Globe, ShieldCheck, Rocket, Clock, DollarSign,
-  X, PlayCircle, ArrowUpRight
+  X, PlayCircle, ArrowUpRight, Share2
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "../lib/utils";
@@ -27,7 +27,8 @@ export default function Home() {
       image: "image",
       voice: "voice",
       video: "video",
-      caption: "caption"
+      caption: "caption",
+      social: "social"
     };
     const targetTool = toolMap[type] || null;
     
@@ -190,7 +191,7 @@ export default function Home() {
               { id: "image", icon: Sparkles, title: "AI-Powered Creation", desc: "Generate videos, images, and voiceovers using simple text prompts. No design skills required." },
               { id: "voice", icon: Mic, title: "AI Speaking Agents", desc: "Automate tasks like editing, scheduling, and publishing using voice commands." },
               { id: "video", icon: Video, title: "High-Resolution Output", desc: "Create cinematic-quality visuals with support for up to 8K resolution." },
-              { id: "collab", icon: Users, title: "Real-Time Collaboration", desc: "Work with your team simultaneously on projects in real time." },
+              { id: "social", icon: Share2, title: "Social Hub & Publisher", desc: "Connect and publish your content across Instagram, LinkedIn, X, and YouTube instantly." },
               { id: "custom", icon: Settings, title: "Advanced Customization", desc: "Customize templates, avatars, voice tones, and styles to match your brand." },
               { id: "instant", icon: Zap, title: "Instant Generation", desc: "Go from idea to final product in seconds with our optimized AI engine." }
             ].map((feature, i) => (
