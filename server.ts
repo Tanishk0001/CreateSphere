@@ -70,7 +70,15 @@ app.get("/api/auth/url/:platform", (req, res) => {
     });
   }
 
-  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/callback/${platform}`;
+  // Ensure redirect URI uses https (required by social platforms)
+  let host = req.get("host");
+  let protocol = "https";
+  
+  // Use APP_URL if provided, otherwise assume https for run.app domains
+  const redirectUri = process.env.APP_URL 
+    ? `${process.env.APP_URL}/api/auth/callback/${platform}`
+    : `${protocol}://${host}/api/auth/callback/${platform}`;
+
   const state = Buffer.from(JSON.stringify({ userId, platform })).toString("base64");
 
   const params: any = {
@@ -111,7 +119,12 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
 
   try {
     const { userId } = JSON.parse(Buffer.from(state as string, "base64").toString());
-    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/callback/${platform}`;
+    // Ensure redirect URI uses https
+    let host = req.get("host");
+    let protocol = "https";
+    const redirectUri = process.env.APP_URL 
+      ? `${process.env.APP_URL}/api/auth/callback/${platform}`
+      : `${protocol}://${host}/api/auth/callback/${platform}`;
 
     const params: any = {
       grant_type: "authorization_code",

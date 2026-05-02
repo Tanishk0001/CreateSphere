@@ -5,7 +5,7 @@ import {
   Plus, Check, ExternalLink, Image as ImageIcon, 
   Video, Calendar, Send, Shield, Globe, Lock,
   Loader2, AlertCircle, Sparkles, Wand2, Layers,
-  AlertTriangle
+  AlertTriangle, Key, Copy
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { collection, onSnapshot, query } from "firebase/firestore";
@@ -496,14 +496,43 @@ export default function SocialHub({ projects, user }: SocialHubProps) {
                })}
             </div>
             
-            <div className="mt-10 pt-6 border-t border-white/5">
-               <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Shield className="w-4 h-4 text-brand-400" />
-                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">Privacy Shield</span>
+            <div className="mt-10 space-y-4 pt-6 border-t border-white/5">
+               <div className="p-5 bg-brand-500/5 rounded-2xl border border-brand-500/10">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
+                      <Key className="w-5 h-5 text-brand-400" />
+                    </div>
+                    <div className="flex-grow">
+                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest mb-1 italic">Developer Setup</h4>
+                      <p className="text-[10px] text-white/40 leading-relaxed mb-4">
+                        To connect, add this Redirect URI to your platform portals:
+                      </p>
+                      <div className="flex items-center gap-2 bg-black/40 rounded-xl p-3 border border-white/5 group">
+                        <code className="text-[9px] font-mono text-brand-300 truncate select-all">
+                          https://create-sphere-smoky.vercel.app/api/auth/callback/[platform]
+                        </code>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(`https://create-sphere-smoky.vercel.app/api/auth/callback/[platform]`);
+                            setShowStatus({ type: "success", title: "Copied!", desc: "URI template copied." });
+                            setTimeout(() => setShowStatus(null), 2000);
+                          }}
+                          className="ml-auto p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-[9px] text-white/40 leading-relaxed font-sans">
-                    OAuth 2.0 tokens are encrypted and stored in your private hub. Revoke access anytime from the platform dashboard.
+               </div>
+
+               <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Shield className="w-4 h-4 text-white/20" />
+                    <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Privacy Shield</span>
+                  </div>
+                  <p className="text-[9px] text-white/20 leading-relaxed font-sans">
+                    OAuth 2.0 tokens are encrypted. Revoke access anytime from the platform dashboard.
                   </p>
                </div>
             </div>
