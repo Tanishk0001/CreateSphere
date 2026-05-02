@@ -26,8 +26,8 @@ async function getDb() {
   
   try {
     const admin = await getAdmin();
+    // Default to the config file path
     const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
-    console.log(`[Firebase] Checking config at: ${configPath}`);
     
     let firebaseConfig: any = {};
     if (fs.existsSync(configPath)) {
@@ -37,7 +37,7 @@ async function getDb() {
           firebaseConfig = JSON.parse(content);
         }
       } catch (parseError) {
-        console.error("[Firebase] Error parsing config file:", parseError);
+        console.warn("[Firebase] Config file exists but couldn't be parsed:", parseError);
       }
     }
     
@@ -50,14 +50,23 @@ async function getDb() {
           const cert = JSON.parse(serviceAccount);
           admin.initializeApp({
             credential: admin.credential.cert(cert),
+            projectId: cert.project_id || projectId
           });
+          console.log("[Firebase] Initialized with Service Account.");
         } catch (authError) {
-          console.error("[Firebase] Error parsing service account:", authError);
+          console.error("[Firebase] Service Account parse failed:", authError);
         }
       } else if (projectId) {
-        admin.initializeApp({ projectId });
+        // This usually only works on Google Cloud environments (Cloud Run, GAE, etc.)
+        // Vercel requires FIREBASE_SERVICE_ACCOUNT.
+        try {
+          admin.initializeApp({ projectId });
+          console.log(`[Firebase] Initialized with Project ID: ${projectId}. Note: This may fail on Vercel without a Service Account.`);
+        } catch (initErr) {
+          console.error("[Firebase] Initialization with Project ID failed:", initErr);
+        }
       } else {
-        console.warn("[Firebase] No Project ID or Service Account found. Admin SDK not fully initialized.");
+        console.warn("[Firebase] No credentials found. FIREBASE_SERVICE_ACCOUNT environment variable is required for production.");
       }
     }
     
@@ -139,7 +148,7 @@ const SOCIAL_CONFIG: any = {
 };
 
 // Start OAuth Flow
-app.get("/api/auth/url/:platform", (req, res) => {
+app.get("/api/auth/url/:platform", async (req, res) => {
   try {
     const { platform } = req.params;
     const { userId } = req.query;
@@ -166,18 +175,27 @@ app.get("/api/auth/url/:platform", (req, res) => {
     }
 
     // Determine host and protocol
-    let rawHost = req.get("x-forwarded-host") || req.get("host") || "";
-    let host = rawHost.split(",")[0].trim();
-    
-    let rawProto = req.get("x-forwarded-proto") || "https";
-    let protocol = rawProto.split(",")[0].trim();
+    let host = "";
+    let protocol = "https";
+
+    try {
+      let rawHost = req.get("x-forwarded-host") || req.get("host") || "";
+      host = rawHost.split(",")[0].trim();
+      
+      let rawProto = req.get("x-forwarded-proto") || "https";
+      protocol = rawProto.split(",")[0].trim();
+    } catch (headerErr) {
+      console.warn("[OAuth] Error parsing headers, using defaults:", headerErr);
+      host = req.get("host") || "localhost:3000";
+    }
     
     // Use APP_URL if provided, otherwise assume protocol from headers
     const redirectUri = process.env.APP_URL 
       ? `${process.env.APP_URL}/api/auth/callback/${platform}`
       : `${protocol}://${host}/api/auth/callback/${platform}`;
 
-    console.log(`[OAuth] Redirect URI: ${redirectUri}`);
+    console.log(`[OAuth] Redirect URI for request: ${redirectUri}`);
+    
     const stateData = { userId, platform: normalizedPlatform };
     const state = Buffer.from(JSON.stringify(stateData)).toString("base64");
 
@@ -201,12 +219,15 @@ app.get("/api/auth/url/:platform", (req, res) => {
 
     const searchParams = new URLSearchParams(params);
     const finalUrl = `${config.authUrl}?${searchParams.toString()}`;
-    console.log(`[OAuth] Generated URL: ${finalUrl.substring(0, 50)}...`);
     
     res.json({ url: finalUrl });
   } catch (err: any) {
     console.error("[OAuth] CRITICAL error in auth/url:", err);
-    res.status(500).json({ error: "Server error generating auth URL", message: err.message });
+    res.status(500).json({ 
+      error: "Server error generating auth URL", 
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 

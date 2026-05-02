@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { MessageCircle, X, Send, Sparkles, Loader2, User, Bot, Minimize2, Maximize2 } from "lucide-react";
-import { GoogleGenAI } from "@google/genai";
+import { generateChatResponse } from "../lib/gemini";
 import { cn } from "../lib/utils";
 
 const SYSTEM_INSTRUCTION = `You are the CreateSphere Assistant, a helpful and friendly AI chatbot for the CreateSphere platform.
@@ -84,31 +84,16 @@ export default function Chatbot() {
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = "gemini-3-flash-preview";
-      
       const chatHistory = messages.map(m => ({
-        role: m.role === "user" ? "user" : "model",
+        role: m.role === "user" ? "user" : "model" as const,
         parts: [{ text: m.text }]
       }));
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          ...chatHistory,
-          { role: "user", parts: [{ text: messageText }] }
-        ],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.7,
-          topP: 0.95,
-          topK: 40,
-        }
-      });
+      const botText = await generateChatResponse(messageText, chatHistory, SYSTEM_INSTRUCTION);
 
       const botMessage: Message = {
         role: "bot",
-        text: response.text || "I'm sorry, I couldn't process that. Please try again.",
+        text: botText || "I'm sorry, I couldn't process that. Please try again.",
         timestamp: new Date(),
       };
 
