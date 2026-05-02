@@ -18,7 +18,7 @@ interface SocialHubProps {
 
 const PLATFORMS = [
   { id: "linkedin", name: "LinkedIn", icon: Linkedin, color: "bg-[#0A66C2]" },
-  { id: "twitter", name: "X (Twitter)", icon: Twitter, color: "bg-black" },
+  { id: "x", name: "X (Twitter)", icon: Twitter, color: "bg-black" },
   { id: "instagram", name: "Instagram", icon: Instagram, color: "bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600" },
   { id: "youtube", name: "YouTube", icon: Youtube, color: "bg-[#FF0000]" },
 ];
@@ -526,11 +526,11 @@ export default function SocialHub({ projects, user }: SocialHubProps) {
                       </p>
                       <div className="flex items-center gap-2 bg-black/40 rounded-xl p-3 border border-white/5 group">
                         <code className="text-[9px] font-mono text-brand-300 truncate select-all">
-                          https://create-sphere-smoky.vercel.app/api/auth/callback/[platform]
+                          {window.location.origin}/api/auth/callback/[platform]
                         </code>
                         <button 
                           onClick={() => {
-                            navigator.clipboard.writeText(`https://create-sphere-smoky.vercel.app/api/auth/callback/[platform]`);
+                            navigator.clipboard.writeText(`${window.location.origin}/api/auth/callback/[platform]`);
                             setShowStatus({ type: "success", title: "Copied!", desc: "URI template copied." });
                             setTimeout(() => setShowStatus(null), 2000);
                           }}

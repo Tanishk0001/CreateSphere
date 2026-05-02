@@ -1,6 +1,6 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import cors from "cors";
 import axios from "axios";
@@ -11,17 +11,37 @@ import OpenAI from "openai";
 dotenv.config();
 
 // Initialize Firebase Admin
-let db: admin.firestore.Firestore;
+let db: admin.firestore.Firestore | null = null;
 try {
+  const firebaseConfig = JSON.parse(await fs.promises.readFile(path.resolve(process.cwd(), "firebase-applet-config.json"), "utf8"));
+  
   if (!admin.apps.length) {
-    admin.initializeApp({
-      projectId: "gen-lang-client-0682568976",
-    });
+    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccount) {
+      const cert = JSON.parse(serviceAccount);
+      admin.initializeApp({
+        credential: admin.credential.cert(cert),
+      });
+    } else {
+      admin.initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+      });
+    }
   }
-  db = admin.firestore();
+  
+  // Use specific databaseId if provided in config
+  if (firebaseConfig.firestoreDatabaseId) {
+    db = admin.firestore(admin.apps[0]!);
+    // In newer firebase-admin, we can set the databaseId
+    // @ts-ignore
+    db.databaseId = firebaseConfig.firestoreDatabaseId;
+  } else {
+    db = admin.firestore();
+  }
+  
+  console.log(`[Firebase] Database initialized (ID: ${firebaseConfig.firestoreDatabaseId || "(default)"})`);
 } catch (error) {
-  console.error("Firebase Admin Init Error:", error);
-  // Fallback or handle later
+  console.error("[Firebase] Admin Init Error:", error);
 }
 
 const app = express();
@@ -30,10 +50,23 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
+// Request logging for Vercel debugging
+app.use((req, res, next) => {
+  console.log(`[Request] ${req.method} ${req.url}`);
+  next();
+});
+
 // --- Social Media Integration ---
 
 const SOCIAL_CONFIG: any = {
   twitter: {
+    authUrl: "https://twitter.com/i/oauth2/authorize",
+    tokenUrl: "https://api.twitter.com/2/oauth2/token",
+    scope: "tweet.read tweet.write users.read offline.access",
+    clientId: process.env.TWITTER_CLIENT_ID,
+    clientSecret: process.env.TWITTER_CLIENT_SECRET,
+  },
+  x: {
     authUrl: "https://twitter.com/i/oauth2/authorize",
     tokenUrl: "https://api.twitter.com/2/oauth2/token",
     scope: "tweet.read tweet.write users.read offline.access",
@@ -65,56 +98,64 @@ const SOCIAL_CONFIG: any = {
 
 // Start OAuth Flow
 app.get("/api/auth/url/:platform", (req, res) => {
-  const { platform } = req.params;
-  const { userId } = req.query;
-  
-  // Normalize platform: treat "x" as "twitter"
-  const normalizedPlatform = platform === "x" ? "twitter" : platform;
-  const config = SOCIAL_CONFIG[normalizedPlatform];
-  
-  console.log(`[OAuth] auth/url request for ${normalizedPlatform} (orig: ${platform}) by user ${userId}`);
+  try {
+    const { platform } = req.params;
+    const { userId } = req.query;
+    
+    // Normalize platform: treat "x" as "twitter" (and use "x" consistently)
+    const normalizedPlatform = platform === "x" || platform === "twitter" ? "x" : platform;
+    const config = SOCIAL_CONFIG[normalizedPlatform];
+    
+    console.log(`[OAuth] REQUEST: platform=${normalizedPlatform}, userId=${userId}`);
 
-  if (!config || !config.clientId) {
-    console.error(`[OAuth] Missing clientId for ${normalizedPlatform}`);
-    return res.status(400).json({ 
-      error: `${normalizedPlatform.charAt(0).toUpperCase() + normalizedPlatform.slice(1)} configuration missing.`, 
-      details: `Please set ${normalizedPlatform.toUpperCase()}_CLIENT_ID in the platform settings.` 
-    });
+    if (!config || !config.clientId) {
+      console.error(`[OAuth] ERR: Missing clientId for ${normalizedPlatform}`);
+      return res.status(400).json({ 
+        error: `${normalizedPlatform.charAt(0).toUpperCase() + normalizedPlatform.slice(1)} configuration missing.`, 
+        details: `Please set ${normalizedPlatform.toUpperCase() === 'X' ? 'TWITTER' : normalizedPlatform.toUpperCase()}_CLIENT_ID in the platform settings.` 
+      });
+    }
+
+    // Ensure redirect URI uses https (required by social platforms)
+    let host = req.get("host");
+    let protocol = "https";
+    
+    // Use APP_URL if provided, otherwise assume https for run.app domains
+    const redirectUri = process.env.APP_URL 
+      ? `${process.env.APP_URL}/api/auth/callback/${platform}`
+      : `${protocol}://${host}/api/auth/callback/${platform}`;
+
+    console.log(`[OAuth] Redirect URI: ${redirectUri}`);
+    const stateData = { userId, platform: normalizedPlatform };
+    const state = Buffer.from(JSON.stringify(stateData)).toString("base64");
+
+    const params: any = {
+      response_type: "code",
+      client_id: config.clientId,
+      redirect_uri: redirectUri,
+      scope: config.scope,
+      state: state,
+    };
+
+    if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
+      params.code_challenge = "f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024";
+      params.code_challenge_method = "plain";
+    }
+
+    if (normalizedPlatform === "youtube") {
+      params.access_type = "offline";
+      params.prompt = "consent";
+    }
+
+    const searchParams = new URLSearchParams(params);
+    const finalUrl = `${config.authUrl}?${searchParams.toString()}`;
+    console.log(`[OAuth] Generated URL: ${finalUrl.substring(0, 50)}...`);
+    
+    res.json({ url: finalUrl });
+  } catch (err: any) {
+    console.error("[OAuth] CRITICAL error in auth/url:", err);
+    res.status(500).json({ error: "Server error generating auth URL", message: err.message });
   }
-
-  // Ensure redirect URI uses https (required by social platforms)
-  let host = req.get("host");
-  let protocol = "https";
-  
-  // Use APP_URL if provided, otherwise assume https for run.app domains
-  const redirectUri = process.env.APP_URL 
-    ? `${process.env.APP_URL}/api/auth/callback/${platform}`
-    : `${protocol}://${host}/api/auth/callback/${platform}`;
-
-  console.log(`[OAuth] built redirectUri: ${redirectUri}`);
-  const state = Buffer.from(JSON.stringify({ userId, platform: normalizedPlatform })).toString("base64");
-
-  const params: any = {
-    response_type: "code",
-    client_id: config.clientId,
-    redirect_uri: redirectUri,
-    scope: config.scope,
-    state: state,
-  };
-
-  if (platform === "twitter") {
-    // Twitter v2 OAuth 2.0 PKCE
-    params.code_challenge = "f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024";
-    params.code_challenge_method = "plain";
-  }
-
-  if (platform === "youtube") {
-    params.access_type = "offline";
-    params.prompt = "consent";
-  }
-
-  const searchParams = new URLSearchParams(params);
-  res.json({ url: `${config.authUrl}?${searchParams.toString()}` });
 });
 
 // OAuth Callback
@@ -132,8 +173,8 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
 
   try {
     const { userId, platform: statePlatform } = JSON.parse(Buffer.from(state as string, "base64").toString());
-    const normalizedPlatform = platform === "x" ? "twitter" : (statePlatform || platform);
-    const config = SOCIAL_CONFIG[normalizedPlatform];
+    const normalizedPlatform = platform === "x" || platform === "twitter" ? "x" : (statePlatform || platform);
+    const config = SOCIAL_CONFIG[normalizedPlatform] || SOCIAL_CONFIG["twitter"];
     
     console.log(`[OAuth] Callback for ${normalizedPlatform}, user: ${userId}`);
 
@@ -154,7 +195,7 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
 
     const tokenHeaders: any = { "Content-Type": "application/x-www-form-urlencoded" };
     
-    if (platform === "twitter") {
+    if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
       params.code_verifier = "f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024";
       const authHeader = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
       tokenHeaders["Authorization"] = `Basic ${authHeader}`;
@@ -163,7 +204,7 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
       delete params.client_secret;
     }
 
-    console.log(`[OAuth] exchanging code for token (${platform})...`);
+    console.log(`[OAuth] exchanging code for token (${normalizedPlatform})...`);
     const response = await axios.post(config.tokenUrl, new URLSearchParams(params).toString(), {
       headers: tokenHeaders,
     });
@@ -171,23 +212,27 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
     const { access_token, refresh_token, expires_in } = response.data;
 
     // Fetch profile info for better UX
-    let profileName = platform;
+    let profileName = normalizedPlatform;
     try {
-      if (platform === "twitter") {
+      if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
         const p = await axios.get("https://api.twitter.com/2/users/me", { headers: { Authorization: `Bearer ${access_token}` } });
         profileName = `@${p.data.data.username}`;
-      } else if (platform === "linkedin") {
+      } else if (normalizedPlatform === "linkedin") {
         const p = await axios.get("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${access_token}` } });
         profileName = p.data.name;
-      } else if (platform === "youtube") {
+      } else if (normalizedPlatform === "youtube") {
         const p = await axios.get("https://www.googleapis.com/oauth2/v2/userinfo", { headers: { Authorization: `Bearer ${access_token}` } });
         profileName = p.data.name;
       }
     } catch (e) { console.error("Profile fetch error:", e); }
 
+    if (!db) {
+      throw new Error("Database not available for storing tokens.");
+    }
+
     // Store in Firestore
-    await db.collection("users").doc(userId).collection("socialConnections").doc(platform).set({
-      platform,
+    await db.collection("users").doc(userId).collection("socialConnections").doc(normalizedPlatform).set({
+      platform: normalizedPlatform,
       accessToken: access_token,
       refreshToken: refresh_token || null,
       expiresAt: Date.now() + (expires_in || 3600) * 1000,
@@ -241,11 +286,13 @@ app.post("/api/social/publish", async (req, res) => {
 
   try {
     for (const platform of platforms) {
+      const normalizedPlatform = platform === "x" || platform === "twitter" ? "x" : platform;
+      
       if (!db) {
         results[platform] = { status: "failed", error: "Database not initialized" };
         continue;
       }
-      const connDoc = await db.collection("users").doc(userId).collection("socialConnections").doc(platform).get();
+      const connDoc = await db.collection("users").doc(userId).collection("socialConnections").doc(normalizedPlatform).get();
       
       if (!connDoc.exists) {
         results[platform] = { status: "failed", error: "Not connected" };
@@ -255,14 +302,14 @@ app.post("/api/social/publish", async (req, res) => {
       const { accessToken } = connDoc.data()!;
 
       try {
-        if (platform === "twitter") {
+        if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
           // Twitter API v2 POST /2/tweets
           await axios.post("https://api.twitter.com/2/tweets", 
             { text: caption },
             { headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" } }
           );
           results[platform] = { status: "success" };
-        } else if (platform === "linkedin") {
+        } else if (normalizedPlatform === "linkedin") {
           // LinkedIn UGC Post API
           const profileRes = await axios.get("https://api.linkedin.com/v2/userinfo", {
             headers: { Authorization: `Bearer ${accessToken}` }
@@ -335,8 +382,21 @@ app.post("/api/generate-video", async (req, res) => {
   }
 });
 
+// Global Error Handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("[Global Error Handler]", err);
+  if (!res.headersSent) {
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+    });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
