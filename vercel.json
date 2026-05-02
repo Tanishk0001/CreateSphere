@@ -1,13 +1,8 @@
 {
-  "functions": {
-    "server.ts": {
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/server.ts"
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
     },
     {
       "source": "/(.*)",

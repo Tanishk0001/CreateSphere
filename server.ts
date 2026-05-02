@@ -11,12 +11,18 @@ import OpenAI from "openai";
 dotenv.config();
 
 // Initialize Firebase Admin
-if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: "gen-lang-client-0682568976",
-  });
+let db: admin.firestore.Firestore;
+try {
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      projectId: "gen-lang-client-0682568976",
+    });
+  }
+  db = admin.firestore();
+} catch (error) {
+  console.error("Firebase Admin Init Error:", error);
+  // Fallback or handle later
 }
-const db = admin.firestore();
 
 const app = express();
 const PORT = 3000;
@@ -93,7 +99,8 @@ app.get("/api/auth/url/:platform", (req, res) => {
   };
 
   if (platform === "twitter") {
-    params.code_challenge = "challenge";
+    // Twitter v2 OAuth 2.0 PKCE
+    params.code_challenge = "f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024";
     params.code_challenge_method = "plain";
   }
 
@@ -138,12 +145,20 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
       client_secret: config.clientSecret,
     };
 
+    const tokenHeaders: any = { "Content-Type": "application/x-www-form-urlencoded" };
+    
     if (platform === "twitter") {
-      params.code_verifier = "challenge";
+      params.code_verifier = "f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024f8a0024";
+      const authHeader = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+      tokenHeaders["Authorization"] = `Basic ${authHeader}`;
+      // Some platforms error if credentials are in BOTH header and body
+      delete params.client_id;
+      delete params.client_secret;
     }
 
+    console.log(`[OAuth] exchanging code for token (${platform})...`);
     const response = await axios.post(config.tokenUrl, new URLSearchParams(params).toString(), {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: tokenHeaders,
     });
 
     const { access_token, refresh_token, expires_in } = response.data;
@@ -219,6 +234,10 @@ app.post("/api/social/publish", async (req, res) => {
 
   try {
     for (const platform of platforms) {
+      if (!db) {
+        results[platform] = { status: "failed", error: "Database not initialized" };
+        continue;
+      }
       const connDoc = await db.collection("users").doc(userId).collection("socialConnections").doc(platform).get();
       
       if (!connDoc.exists) {
