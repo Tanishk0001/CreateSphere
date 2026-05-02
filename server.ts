@@ -4,20 +4,28 @@ import fs from "fs";
 import dotenv from "dotenv";
 import cors from "cors";
 import axios from "axios";
-import admin from "firebase-admin";
 
-import OpenAI from "openai";
+// Lazy imports for heavy libraries
+let adminCached: any = null;
+async function getAdmin() {
+  if (adminCached) return adminCached;
+  adminCached = (await import("firebase-admin")).default;
+  return adminCached;
+}
+
+let OpenAI: any = null;
 
 dotenv.config();
 
 // Initialize Firebase Admin lazily
-let dbInstance: admin.firestore.Firestore | null = null;
+let dbInstance: any = null;
 let isInitialized = false;
 
-function getDb() {
+async function getDb() {
   if (isInitialized) return dbInstance;
   
   try {
+    const admin = await getAdmin();
     const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
     console.log(`[Firebase] Checking config at: ${configPath}`);
     
@@ -158,10 +166,13 @@ app.get("/api/auth/url/:platform", (req, res) => {
     }
 
     // Determine host and protocol
-    let host = req.get("x-forwarded-host") || req.get("host");
-    let protocol = req.get("x-forwarded-proto") || "https";
+    let rawHost = req.get("x-forwarded-host") || req.get("host") || "";
+    let host = rawHost.split(",")[0].trim();
     
-    // Use APP_URL if provided, otherwise assume https for run.app domains
+    let rawProto = req.get("x-forwarded-proto") || "https";
+    let protocol = rawProto.split(",")[0].trim();
+    
+    // Use APP_URL if provided, otherwise assume protocol from headers
     const redirectUri = process.env.APP_URL 
       ? `${process.env.APP_URL}/api/auth/callback/${platform}`
       : `${protocol}://${host}/api/auth/callback/${platform}`;
@@ -267,12 +278,13 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
       }
     } catch (e) { console.error("Profile fetch error:", e); }
 
-    const db = getDb();
+    const db = await getDb();
     if (!db) {
       throw new Error("Database not available for storing tokens.");
     }
 
     // Store in Firestore
+    const admin = await getAdmin();
     await db.collection("users").doc(userId).collection("socialConnections").doc(normalizedPlatform).set({
       platform: normalizedPlatform,
       accessToken: access_token,
@@ -324,7 +336,7 @@ app.post("/api/social/publish", async (req, res) => {
     return res.status(400).json({ error: "No platforms selected" });
   }
 
-  const db = getDb();
+  const db = await getDb();
   if (!db) {
     return res.status(500).json({ error: "Database not initialized" });
   }
@@ -401,6 +413,20 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+app.get("/api/debug", (req, res) => {
+  res.json({
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: process.env.VERCEL,
+      HAS_TWITTER_ID: !!process.env.TWITTER_CLIENT_ID,
+      HAS_FIREBASE_SA: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+    },
+    headers: req.headers,
+    url: req.url,
+    method: req.method
+  });
+});
+
 app.post("/api/generate-video", async (req, res) => {
   const { prompt } = req.body;
   const openAIKey = process.env.OPENAI_API_KEY;
@@ -410,6 +436,9 @@ app.post("/api/generate-video", async (req, res) => {
   }
 
   try {
+    if (!OpenAI) {
+      OpenAI = (await import("openai")).default;
+    }
     const openai = new OpenAI({ apiKey: openAIKey });
     
     // As of now, Sora is not publicly available via API.
