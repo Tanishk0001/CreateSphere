@@ -16,32 +16,28 @@ const getAI = () => {
 export const generateChatResponse = async (prompt: string, history: any[] = [], systemInstruction?: string) => {
   try {
     const ai = getAI();
-    const modelName = "gemini-1.5-flash"; // Use stable model
+    const model = "gemini-3-flash-preview"; 
     
-    const model = ai.getGenerativeModel({
-      model: modelName,
-      systemInstruction: systemInstruction,
-    });
-
-    // Format history for the SDK
-    const formattedHistory = history.map(item => ({
+    // Format history for the @google/genai SDK
+    const formattedContents = history.map(item => ({
       role: item.role === "bot" || item.role === "model" ? "model" : "user",
       parts: item.parts || [{ text: item.text }]
     }));
 
-    const result = await model.generateContent({
-      contents: [
-        ...formattedHistory,
-        { role: "user", parts: [{ text: prompt }] }
-      ],
-      generationConfig: {
+    // Add current prompt
+    formattedContents.push({ role: "user", parts: [{ text: prompt }] });
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: formattedContents,
+      config: {
+        systemInstruction,
         temperature: 0.7,
         topP: 0.95,
       }
     });
 
-    const response = await result.response;
-    return response.text();
+    return response.text;
   } catch (error) {
     console.error("Gemini API error:", error);
     throw error;

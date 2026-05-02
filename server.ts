@@ -9,8 +9,15 @@ import axios from "axios";
 let adminCached: any = null;
 async function getAdmin() {
   if (adminCached) return adminCached;
-  adminCached = (await import("firebase-admin")).default;
-  return adminCached;
+  try {
+    const mod = await import("firebase-admin");
+    // Handle both ESM and CJS interop
+    adminCached = (mod as any).default || mod;
+    return adminCached;
+  } catch (err) {
+    console.error("[Firebase] Failed to import firebase-admin:", err);
+    throw err;
+  }
 }
 
 let OpenAI: any = null;
@@ -335,13 +342,33 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
     `);
   } catch (error: any) {
     console.error("OAuth Callback Error:", error.response?.data || error.message);
+    
+    let errorTitle = "Sync Failed";
+    let errorDesc = error.response?.data?.error_description || error.message;
+    let actionTip = "Close Window";
+    
+    // Check for specific Firebase credential errors
+    if (errorDesc.includes("Could not load the default credentials") || 
+        errorDesc.includes("credentials") || 
+        errorDesc.includes("Firebase")) {
+      errorTitle = "Cloud Credentials Missing";
+      errorDesc = "This environment is missing the required Firebase Service Account. For production (Vercel/Cloud Run), you must set the FIREBASE_SERVICE_ACCOUNT environment variable.";
+      actionTip = "How to Fix";
+    }
+
     res.send(`
       <html>
         <body style="font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #fef2f2;">
-          <div style="text-align: center; background: white; padding: 40px; border-radius: 24px; shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); max-width: 400px;">
-            <h2 style="color: #ef4444; margin-bottom: 8px;">Sync Failed</h2>
-            <p style="color: #64748b; margin-bottom: 24px;">${error.response?.data?.error_description || error.message}</p>
-            <button onclick="window.close()" style="background: #ef4444; color: white; border: none; padding: 12px 24px; border-radius: 12px; font-weight: 600; cursor: pointer;">Close Window</button>
+          <div style="text-align: center; background: white; padding: 40px; border-radius: 24px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); max-width: 450px; border: 1px solid #fee2e2;">
+            <div style="background: #fee2e2; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px;">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            </div>
+            <h2 style="color: #991b1b; margin-bottom: 8px;">${errorTitle}</h2>
+            <p style="color: #b91c1c; margin-bottom: 24px; font-size: 14px; line-height: 1.5;">${errorDesc}</p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+              <button onclick="window.close()" style="background: #ef4444; color: white; border: none; padding: 12px 24px; border-radius: 12px; font-weight: 600; cursor: pointer;">Close Window</button>
+              ${actionTip === "How to Fix" ? `<a href="https://firebase.google.com/docs/admin/setup#initialize-sdk" target="_blank" style="background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; padding: 12px 24px; border-radius: 12px; font-weight: 600; cursor: pointer; text-decoration: none; font-size: 14px;">Documentation</a>` : ''}
+            </div>
           </div>
         </body>
       </html>
@@ -510,6 +537,12 @@ async function startServer() {
 
 export default app;
 
-if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
-  startServer();
+// On Vercel, we must not call listen() as the environment handles the server start.
+// This condition ensures we only start the server in non-Vercel environments (like local or Cloud Run).
+const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL_URL || !!process.env.VERCEL_REGION;
+
+if (!isVercel) {
+  startServer().catch(err => {
+    console.error("Failed to start server:", err);
+  });
 }
