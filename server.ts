@@ -10,39 +10,73 @@ import OpenAI from "openai";
 
 dotenv.config();
 
-// Initialize Firebase Admin
-let db: admin.firestore.Firestore | null = null;
-try {
-  const firebaseConfig = JSON.parse(await fs.promises.readFile(path.resolve(process.cwd(), "firebase-applet-config.json"), "utf8"));
+// Initialize Firebase Admin lazily
+let dbInstance: admin.firestore.Firestore | null = null;
+let isInitialized = false;
+
+function getDb() {
+  if (isInitialized) return dbInstance;
   
-  if (!admin.apps.length) {
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (serviceAccount) {
-      const cert = JSON.parse(serviceAccount);
-      admin.initializeApp({
-        credential: admin.credential.cert(cert),
-      });
-    } else {
-      admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-      });
+  try {
+    const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+    console.log(`[Firebase] Checking config at: ${configPath}`);
+    
+    let firebaseConfig: any = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        const content = fs.readFileSync(configPath, "utf8");
+        if (content && content.trim()) {
+          firebaseConfig = JSON.parse(content);
+        }
+      } catch (parseError) {
+        console.error("[Firebase] Error parsing config file:", parseError);
+      }
     }
+    
+    if (!admin.apps.length) {
+      const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+      const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+      
+      if (serviceAccount) {
+        try {
+          const cert = JSON.parse(serviceAccount);
+          admin.initializeApp({
+            credential: admin.credential.cert(cert),
+          });
+        } catch (authError) {
+          console.error("[Firebase] Error parsing service account:", authError);
+        }
+      } else if (projectId) {
+        admin.initializeApp({ projectId });
+      } else {
+        console.warn("[Firebase] No Project ID or Service Account found. Admin SDK not fully initialized.");
+      }
+    }
+    
+    if (admin.apps.length > 0) {
+      const databaseId = process.env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+      if (databaseId) {
+        try {
+          // @ts-ignore
+          dbInstance = admin.app().firestore(databaseId);
+        } catch (e) {
+          console.warn("[Firebase] Error initializing specific database, falling back:", e);
+          dbInstance = admin.firestore();
+        }
+      } else {
+        dbInstance = admin.firestore();
+      }
+    }
+    
+    console.log(`[Firebase] Init completed. DB instance: ${dbInstance ? "Ready" : "Missing"}`);
+  } catch (error) {
+    console.error("[Firebase] Critical Initialization Error:", error);
+  } finally {
+    isInitialized = true;
   }
-  
-  // Use specific databaseId if provided in config
-  if (firebaseConfig.firestoreDatabaseId) {
-    db = admin.firestore(admin.apps[0]!);
-    // In newer firebase-admin, we can set the databaseId
-    // @ts-ignore
-    db.databaseId = firebaseConfig.firestoreDatabaseId;
-  } else {
-    db = admin.firestore();
-  }
-  
-  console.log(`[Firebase] Database initialized (ID: ${firebaseConfig.firestoreDatabaseId || "(default)"})`);
-} catch (error) {
-  console.error("[Firebase] Admin Init Error:", error);
+  return dbInstance;
 }
+
 
 const app = express();
 const PORT = 3000;
@@ -102,23 +136,30 @@ app.get("/api/auth/url/:platform", (req, res) => {
     const { platform } = req.params;
     const { userId } = req.query;
     
-    // Normalize platform: treat "x" as "twitter" (and use "x" consistently)
+    // Normalize platform
     const normalizedPlatform = platform === "x" || platform === "twitter" ? "x" : platform;
     const config = SOCIAL_CONFIG[normalizedPlatform];
     
-    console.log(`[OAuth] REQUEST: platform=${normalizedPlatform}, userId=${userId}`);
+    console.log(`[OAuth] GET_URL: platform=${normalizedPlatform}, userId=${userId}`);
 
-    if (!config || !config.clientId) {
-      console.error(`[OAuth] ERR: Missing clientId for ${normalizedPlatform}`);
+    if (!config) {
+      console.error(`[OAuth] ERR: Platform config missing for ${normalizedPlatform}`);
+      return res.status(400).json({ error: "Platform not supported" });
+    }
+
+    if (!config.clientId) {
+      const envKey = `${normalizedPlatform.toUpperCase() === 'X' ? 'TWITTER' : normalizedPlatform.toUpperCase()}_CLIENT_ID`;
+      console.error(`[OAuth] ERR: Missing ${envKey}`);
       return res.status(400).json({ 
-        error: `${normalizedPlatform.charAt(0).toUpperCase() + normalizedPlatform.slice(1)} configuration missing.`, 
-        details: `Please set ${normalizedPlatform.toUpperCase() === 'X' ? 'TWITTER' : normalizedPlatform.toUpperCase()}_CLIENT_ID in the platform settings.` 
+        error: "Configuration Missing", 
+        message: `Please provide ${envKey} in your environment variables.`,
+        details: `Platform: ${normalizedPlatform}`
       });
     }
 
-    // Ensure redirect URI uses https (required by social platforms)
-    let host = req.get("host");
-    let protocol = "https";
+    // Determine host and protocol
+    let host = req.get("x-forwarded-host") || req.get("host");
+    let protocol = req.get("x-forwarded-proto") || "https";
     
     // Use APP_URL if provided, otherwise assume https for run.app domains
     const redirectUri = process.env.APP_URL 
@@ -226,6 +267,7 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
       }
     } catch (e) { console.error("Profile fetch error:", e); }
 
+    const db = getDb();
     if (!db) {
       throw new Error("Database not available for storing tokens.");
     }
@@ -282,16 +324,17 @@ app.post("/api/social/publish", async (req, res) => {
     return res.status(400).json({ error: "No platforms selected" });
   }
 
+  const db = getDb();
+  if (!db) {
+    return res.status(500).json({ error: "Database not initialized" });
+  }
+
   const results: any = {};
 
   try {
     for (const platform of platforms) {
       const normalizedPlatform = platform === "x" || platform === "twitter" ? "x" : platform;
       
-      if (!db) {
-        results[platform] = { status: "failed", error: "Database not initialized" };
-        continue;
-      }
       const connDoc = await db.collection("users").doc(userId).collection("socialConnections").doc(normalizedPlatform).get();
       
       if (!connDoc.exists) {
