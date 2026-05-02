@@ -62,8 +62,10 @@ app.get("/api/auth/url/:platform", (req, res) => {
   const { platform } = req.params;
   const { userId } = req.query;
   const config = SOCIAL_CONFIG[platform];
+  console.log(`[OAuth] auth/url request for ${platform} by user ${userId}`);
 
   if (!config || !config.clientId) {
+    console.error(`[OAuth] Missing clientId for ${platform}`);
     return res.status(400).json({ 
       error: `${platform.charAt(0).toUpperCase() + platform.slice(1)} configuration missing.`, 
       details: `Please set ${platform.toUpperCase()}_CLIENT_ID in the platform settings.` 
@@ -79,6 +81,7 @@ app.get("/api/auth/url/:platform", (req, res) => {
     ? `${process.env.APP_URL}/api/auth/callback/${platform}`
     : `${protocol}://${host}/api/auth/callback/${platform}`;
 
+  console.log(`[OAuth] built redirectUri: ${redirectUri}`);
   const state = Buffer.from(JSON.stringify({ userId, platform })).toString("base64");
 
   const params: any = {
@@ -119,6 +122,7 @@ app.get("/api/auth/callback/:platform", async (req, res) => {
 
   try {
     const { userId } = JSON.parse(Buffer.from(state as string, "base64").toString());
+    console.log(`[OAuth] Callback for ${platform}, user: ${userId}`);
     // Ensure redirect URI uses https
     let host = req.get("host");
     let protocol = "https";
@@ -325,4 +329,8 @@ async function startServer() {
   });
 }
 
-startServer();
+export default app;
+
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  startServer();
+}

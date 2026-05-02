@@ -77,7 +77,16 @@ export default function SocialHub({ projects, user }: SocialHubProps) {
       try {
         setIsConnecting(id);
         const res = await fetch(`/api/auth/url/${id}?userId=${user.uid}`);
-        const data = await res.json();
+        
+        let data;
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          data = await res.json();
+        } else {
+          const text = await res.text();
+          console.error("Non-JSON response from /api/auth/url:", text);
+          throw new Error(`Server returned non-JSON response (${res.status}). See console for details.`);
+        }
         
         if (data.error) {
           setShowStatus({ type: "warning", title: data.error, desc: data.details || "API keys not configured yet." });
@@ -126,7 +135,15 @@ export default function SocialHub({ projects, user }: SocialHubProps) {
         })
       });
 
-      const data = await res.json();
+      let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        console.error("Non-JSON response from /api/social/publish:", text);
+        throw new Error(`Publish failed with non-JSON response (${res.status}).`);
+      }
       
       const failedCount = Object.values(data.results || {}).filter((r: any) => r.status === "failed").length;
       
